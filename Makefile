@@ -1,110 +1,70 @@
-.PHONY: build run clean proto test help
+.PHONY: build clean build-all
 
-# Переменные
-BIN_DIR=bin
-SCRIPTS_DIR=scripts
+# Build all services
+build-all: build-auth build-chat build-rest-auth
 
-# Цели по умолчанию
-help: ## Показать справку
-	@echo "Доступные команды:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+# Build individual services
+build-auth:
+	@echo "Building auth-service..."
+	@go build -o bin/auth-service ./cmd/auth-service
 
-build: ## Собрать все бинарные файлы
-	@echo "Building Golang Chat Application..."
-	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/auth-service cmd/auth-service/main.go
-	go build -o $(BIN_DIR)/chat-service cmd/chat-service/main.go
-	go build -o $(BIN_DIR)/chat-client cmd/chat-client/main.go
-	@echo "Build completed!"
+build-chat:
+	@echo "Building chat-service..."
+	@go build -o bin/chat-service ./cmd/chat-service
 
-run: build ## Собрать и запустить все сервисы
-	@echo "Starting all services..."
-	@$(SCRIPTS_DIR)/run.sh
+build-rest-auth:
+	@echo "Building rest-auth-service..."
+	@go build -o bin/rest-auth-service ./cmd/rest-auth-service
 
-clean: ## Очистить бинарные файлы
-	@echo "Cleaning binary files..."
-	@rm -rf $(BIN_DIR)
-	@echo "Clean completed!"
+# Build chat client
+build-client:
+	@echo "Building chat-client..."
+	@go build -o bin/chat-client ./cmd/chat-client
 
-proto: ## Сгенерировать Go код из Protobuf файлов
-	@echo "Generating Go code from Protobuf..."
-	@export PATH=$$PATH:$$(go env GOPATH)/bin && protoc --go_out=. --go_opt=paths=source_relative \
-		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		proto/auth/auth.proto proto/chat/chat.proto
-	@echo "Protobuf generation completed!"
+# Clean build artifacts
+clean:
+	@echo "Cleaning build artifacts..."
+	@rm -rf bin/
+	@go clean
 
-deps: ## Установить зависимости
+# Install dependencies
+deps:
 	@echo "Installing dependencies..."
-	go mod tidy
-	go mod download
-	@echo "Dependencies installed!"
+	@go mod download
+	@go mod tidy
 
-test: ## Запустить тесты
+# Run tests
+test:
 	@echo "Running tests..."
-	go test ./...
-	@echo "Tests completed!"
+	@go test ./...
 
-dev: ## Запустить в режиме разработки
-	@echo "Starting in development mode..."
-	@go run cmd/auth-service/main.go &
-	@go run cmd/chat-service/main.go &
-	@go run cmd/chat-client/main.go
-	@echo "Development mode completed!"
+# Run with race detection
+test-race:
+	@echo "Running tests with race detection..."
+	@go test -race ./...
 
-# Docker commands
-.PHONY: docker-up docker-down docker-logs docker-clean docker-restart
+# Format code
+fmt:
+	@echo "Formatting code..."
+	@go fmt ./...
 
-# Запуск всех сервисов
-docker-up:
-	docker-compose up -d
+# Lint code
+lint:
+	@echo "Linting code..."
+	@golangci-lint run
 
-# Остановка всех сервисов
-docker-down:
-	docker-compose down
-
-# Просмотр логов
-docker-logs:
-	docker-compose logs -f
-
-# Очистка данных (удаление volumes)
-docker-clean:
-	docker-compose down -v
-	docker system prune -f
-
-# Перезапуск сервисов
-docker-restart:
-	docker-compose restart
-
-# Запуск только PostgreSQL
-docker-postgres:
-	docker-compose up -d postgres
-
-# Запуск только Redis
-docker-redis:
-	docker-compose up -d redis
-
-# Подключение к PostgreSQL
-docker-psql:
-	docker exec -it golang-chat-postgres psql -U chatuser -d chatdb
-
-# Быстрое подключение к БД через скрипт
-db-connect:
-	./scripts/connect-db.sh
-
-# Создание резервной копии БД
-docker-backup:
-	docker exec golang-chat-postgres pg_dump -U chatuser chatdb > backup_$(shell date +%Y%m%d_%H%M%S).sql
-
-# Восстановление БД из резервной копии
-docker-restore:
-	@echo "Usage: make docker-restore FILE=backup_file.sql"
-	@if [ -z "$(FILE)" ]; then echo "Please specify FILE parameter"; exit 1; fi
-	docker exec -i golang-chat-postgres psql -U chatuser -d chatdb < $(FILE)
-
-# Проверка статуса контейнеров
-docker-status:
-	docker-compose ps
-
-# Просмотр использования ресурсов
-docker-stats:
-	docker stats golang-chat-postgres golang-chat-redis golang-chat-pgadmin
+# Help
+help:
+	@echo "Available targets:"
+	@echo "  build-all     - Build all services"
+	@echo "  build-auth    - Build auth service"
+	@echo "  build-chat    - Build chat service"
+	@echo "  build-rest-auth - Build REST auth service"
+	@echo "  build-client  - Build chat client"
+	@echo "  clean         - Clean build artifacts"
+	@echo "  deps          - Install dependencies"
+	@echo "  test          - Run tests"
+	@echo "  test-race     - Run tests with race detection"
+	@echo "  fmt           - Format code"
+	@echo "  lint          - Lint code"
+	@echo "  help          - Show this help"
