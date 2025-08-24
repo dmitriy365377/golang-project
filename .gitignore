@@ -17,24 +17,42 @@
 # Go workspace file
 go.work
 
-# Binary files
+# Binary files - NEVER commit these!
 bin/
 dist/
+build/
+# Specific binary names (backup, in case they're in root)
 chat-client
 auth-service
 chat-service
 rest-auth-service
 
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+
+# Go specific
+*.prof
+*.trace
+*.pprof
+
 # Environment files
 .env
 .env.local
 .env.production
+.env.development
 
 # IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS generated files
 .DS_Store
@@ -47,6 +65,7 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # Generated protobuf files
 *.pb.go
@@ -55,3 +74,12 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+*.tmp
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker
+.dockerignore
