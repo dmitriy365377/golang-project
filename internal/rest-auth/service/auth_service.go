@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"golang-chat/internal/rest-auth/model"
@@ -91,21 +92,84 @@ func (s *AuthService) DeleteUserByID(userID string) error {
 }
 
 // Login выполняет аутентификацию пользователя
-// TODO: Реализовать:
-// 1. Поиск пользователя по username
-// 2. Проверку пароля с помощью bcrypt.CompareHashAndPassword
-// 3. Генерацию JWT access и refresh токенов
-// 4. Обновление времени последнего входа
-// 5. Возврат токенов и информации о пользователе
 func (s *AuthService) Login(req *model.LoginRequest) (*model.LoginResponse, error) {
-	// TODO: Найти пользователя по username
-	// TODO: Проверить пароль
-	// TODO: Сгенерировать access token (время жизни: 15 минут)
-	// TODO: Сгенерировать refresh token (время жизни: 7 дней)
-	// TODO: Обновить LastLoginAt
-	// TODO: Вернуть токены и информацию о пользователе
+	// 1. Найти пользователя по username
+	user, err := s.userRepository.GetUserByUsername(req.Username)
+	if err != nil {
+		return nil, errors.New("invalid credentials")
+	}
 
-	return nil, errors.New("not implemented")
+	// 2. Проверить пароль
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		return nil, errors.New("invalid credentials")
+	}
+
+	// 3. Генерировать access token (время жизни: 15 минут)
+	accessToken, err := s.GenerateAccessToken(user.ID, user.Role)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token: %w", err)
+	}
+
+	// 4. Генерировать refresh token (время жизни: 7 дней)
+	refreshToken, err := s.GenerateRefreshToken(user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+
+	// 5. Создаем cookies
+	accessTokenCookie := &http.Cookie{
+		Name:     "access_token",
+		Value:    accessToken,
+		Path:     "/",
+		HttpOnly: true,                  // Защита от XSS
+		Secure:   s.config.CookieSecure, // Из конфигурации
+		Domain:   s.config.CookieDomain, // Из конфигурации
+		SameSite: getSameSiteMode(s.config.CookieSameSite),
+		MaxAge:   15 * 60, // 15 минут
+	}
+
+	refreshTokenCookie := &http.Cookie{
+		Name:     "refresh_token",
+		Value:    refreshToken,
+		Path:     "/",
+		HttpOnly: true,                  // Защита от XSS
+		Secure:   s.config.CookieSecure, // Из конфигурации
+		Domain:   s.config.CookieDomain, // Из конфигурации
+		SameSite: getSameSiteMode(s.config.CookieSameSite),
+		MaxAge:   7 * 24 * 60 * 60, // 7 дней
+	}
+
+	// 6. Обновить LastLoginAt (если поле есть)
+	// TODO: Добавить поле LastLoginAt в модель User
+	// user.LastLoginAt = time.Now()
+	// if err := s.userRepository.UpdateUser(user); err != nil {
+	//     log.Printf("Warning: failed to update LastLoginAt: %v", err)
+	// }
+
+	// 7. Вернуть токены, cookies и информацию о пользователе
+	response := &model.LoginResponse{
+		AccessToken:        accessToken,
+		RefreshToken:       refreshToken,
+		User:               user,
+		AccessTokenCookie:  accessTokenCookie,
+		RefreshTokenCookie: refreshTokenCookie,
+	}
+
+	return response, nil
+}
+
+// getSameSiteMode преобразует строку в http.SameSite
+func getSameSiteMode(mode string) http.SameSite {
+	switch mode {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "lax":
+		return http.SameSiteLaxMode
+	case "none":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteLaxMode
+	}
 }
 
 // RefreshToken обновляет access token с помощью refresh token

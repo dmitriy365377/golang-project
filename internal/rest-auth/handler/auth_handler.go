@@ -2,11 +2,19 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"time"
 
 	"golang-chat/internal/rest-auth/model"
 	"golang-chat/internal/rest-auth/service"
 	"golang-chat/internal/rest-auth/validation"
+)
+
+// Кастомные ошибки для лучшей обработки
+var (
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrUserNotFound       = errors.New("user not found")
 )
 
 // AuthHandler обрабатывает HTTP запросы для авторизации
@@ -23,20 +31,7 @@ func NewAuthHandler(authService *service.AuthService, validator *validation.Vali
 	}
 }
 
-// Register регистрирует нового пользователя
-// TODO: Реализовать:
-// 1. Парсинг JSON из request body
-// 2. Валидацию входных данных
-// 3. Вызов authService.CreateUser
-// 4. Обработку ошибок
-// 5. Возврат HTTP ответа
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
-	// TODO: Установить Content-Type: application/json
-	// TODO: Парсить JSON из request body в CreateUserRequest
-	// TODO: Валидировать данные (можно использовать go-playground/validator)
-	// TODO: Вызвать authService.CreateUser
-	// TODO: Обработать ошибки и вернуть соответствующий HTTP статус
-	// TODO: В случае успеха вернуть 201 Created с данными пользователя (без пароля)
 
 	// 1. Парсинг JSON
 	var req model.CreateUserRequest
@@ -96,22 +91,44 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 // Login выполняет вход пользователя
-// TODO: Реализовать:
-// 1. Парсинг JSON из request body
-// 2. Валидацию входных данных
-// 3. Вызов authService.Login
-// 4. Обработку ошибок
-// 5. Возврат токенов и информации о пользователе
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	// TODO: Установить Content-Type: application/json
-	// TODO: Парсить JSON из request body в LoginRequest
-	// TODO: Валидировать данные
-	// TODO: Вызвать authService.Login
-	// TODO: Обработать ошибки (неверные учетные данные -> 401 Unauthorized)
-	// TODO: В случае успеха вернуть 200 OK с токенами и информацией о пользователе
+	// Устанавливаем Content-Type
+	w.Header().Set("Content-Type", "application/json")
 
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+	// Парсим JSON из request body
+	var req model.LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Валидируем данные
+	if err := h.validator.ValidateLoginRequest(&req); err != nil {
+		sendErrorResponse(w, http.StatusBadRequest, "Validation error: "+err.Error())
+		return
+	}
+
+	// Вызываем authService.Login
+	response, err := h.authService.Login(&req)
+	if err != nil {
+		// Обрабатываем различные типы ошибок
+		switch {
+		case err.Error() == "invalid credentials":
+			sendErrorResponse(w, http.StatusUnauthorized, "Invalid username or password")
+		case err.Error() == "user not found":
+			sendErrorResponse(w, http.StatusUnauthorized, "Invalid username or password")
+		default:
+			sendErrorResponse(w, http.StatusInternalServerError, "Login failed: "+err.Error())
+		}
+		return
+	}
+
+	// В случае успеха возвращаем 200 OK с токенами и информацией о пользователе
+	// Устанавливаем cookies
+	http.SetCookie(w, response.AccessTokenCookie)
+	http.SetCookie(w, response.RefreshTokenCookie)
+
+	sendJSONResponse(w, http.StatusOK, response)
 }
 
 // RefreshToken обновляет access token
@@ -170,17 +187,40 @@ func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // Logout выполняет выход пользователя
-// TODO: Реализовать:
-// 1. Извлечение user_id из JWT токена
-// 2. Добавление токена в blacklist (если нужно)
-// 3. Возврат успешного ответа
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	// TODO: Получить user_id из контекста
-	// TODO: Опционально: добавить токен в blacklist
-	// TODO: Вернуть 200 OK с сообщением об успешном выходе
+	// Очищаем cookies, устанавливая их в прошлое
+	accessCookie := &http.Cookie{
+		Name:     "access_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1, // Удаляем cookie
+		Expires:  time.Now().Add(-1 * time.Hour),
+	}
 
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+	refreshCookie := &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1, // Удаляем cookie
+		Expires:  time.Now().Add(-1 * time.Hour),
+	}
+
+	// Устанавливаем cookies для удаления
+	http.SetCookie(w, accessCookie)
+	http.SetCookie(w, refreshCookie)
+
+	// Возвращаем успешный ответ
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Successfully logged out",
+	})
 }
 
 // GetAllUsers возвращает список всех пользователей (только для админов)

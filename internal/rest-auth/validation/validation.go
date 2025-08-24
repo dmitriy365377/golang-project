@@ -1,7 +1,9 @@
 package validation
 
 import (
+	"errors"
 	"regexp"
+	"strings"
 
 	"golang-chat/internal/rest-auth/model"
 
@@ -60,4 +62,56 @@ func validateEmailUnique(fl validator.FieldLevel) bool {
 // Метод для валидации CreateUserRequest
 func (v *Validation) ValidateCreateUserRequest(req *model.CreateUserRequest) error {
 	return v.validator.Struct(req)
+}
+
+// Метод для валидации LoginRequest
+func (v *Validation) ValidateLoginRequest(req *model.LoginRequest) error {
+	if err := v.validator.Struct(req); err != nil {
+		// Преобразуем ошибки валидации в более понятные сообщения
+		return v.translateValidationErrors(err)
+	}
+	return nil
+}
+
+// translateValidationErrors преобразует ошибки валидации в понятные сообщения
+func (v *Validation) translateValidationErrors(err error) error {
+	if validationErrors, ok := err.(validator.ValidationErrors); ok {
+		var messages []string
+
+		for _, e := range validationErrors {
+			switch e.Tag() {
+			case "required":
+				messages = append(messages, e.Field()+" is required")
+			case "min":
+				messages = append(messages, e.Field()+" must be at least "+e.Param()+" characters")
+			case "max":
+				messages = append(messages, e.Field()+" must be no more than "+e.Param()+" characters")
+			case "email":
+				messages = append(messages, e.Field()+" must be a valid email address")
+			case "alphanum":
+				messages = append(messages, e.Field()+" must contain only letters and numbers")
+			default:
+				messages = append(messages, e.Field()+" validation failed: "+e.Tag())
+			}
+		}
+
+		return errors.New(strings.Join(messages, "; "))
+	}
+
+	return err
+}
+
+// Метод для валидации RefreshTokenRequest
+func (v *Validation) ValidateRefreshTokenRequest(req *model.RefreshTokenRequest) error {
+	return v.validator.Struct(req)
+}
+
+// Метод для валидации UpdateProfileRequest
+func (v *Validation) ValidateUpdateProfileRequest(req *model.UpdateProfileRequest) error {
+	return v.validator.Struct(req)
+}
+
+// ValidateStruct - универсальный метод для валидации любой структуры
+func (v *Validation) ValidateStruct(s interface{}) error {
+	return v.validator.Struct(s)
 }
