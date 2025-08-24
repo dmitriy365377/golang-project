@@ -20,6 +20,10 @@ go.work
 # Binary files
 bin/
 dist/
+chat-client
+auth-service
+chat-service
+rest-auth-service
 
 # Environment files
 .env
