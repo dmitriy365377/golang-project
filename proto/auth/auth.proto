@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package auth;
+
+option go_package = "golang-chat/proto/auth";
+
+// User Service
+service UserService {
+  rpc Create(CreateUserRequest) returns (CreateUserResponse);
+  rpc Get(GetUserRequest) returns (GetUserResponse);
+  rpc GetList(GetUserListRequest) returns (GetUserListResponse);
+  rpc Update(UpdateUserRequest) returns (UpdateUserResponse);
+  rpc Delete(DeleteUserRequest) returns (DeleteUserResponse);
+}
+
+// Auth Service
+service AuthService {
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc GetAccessToken(GetAccessTokenRequest) returns (GetAccessTokenResponse);
+  rpc GetRefreshToken(GetRefreshTokenRequest) returns (GetRefreshTokenResponse);
+}
+
+// Access Service
+service AccessService {
+  rpc Check(CheckAccessRequest) returns (CheckAccessResponse);
+}
+
+// User messages
+message User {
+  string id = 1;
+  string username = 2;
+  string email = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message CreateUserRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+}
+
+message CreateUserResponse {
+  User user = 1;
+  string error = 2;
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+  string error = 2;
+}
+
+message GetUserListRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message GetUserListResponse {
+  repeated User users = 1;
+  string error = 2;
+}
+
+message UpdateUserRequest {
+  string id = 1;
+  string username = 2;
+  string email = 3;
+}
+
+message UpdateUserResponse {
+  User user = 1;
+  string error = 2;
+}
+
+message DeleteUserRequest {
+  string id = 1;
+}
+
+message DeleteUserResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+// Auth messages
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  string error = 3;
+}
+
+message GetAccessTokenRequest {
+  string refresh_token = 1;
+}
+
+message GetAccessTokenResponse {
+  string access_token = 1;
+  string error = 2;
+}
+
+message GetRefreshTokenRequest {
+  string access_token = 1;
+}
+
+message GetRefreshTokenResponse {
+  string refresh_token = 1;
+  string error = 2;
+}
+
+// Access messages
+message CheckAccessRequest {
+  string access_token = 1;
+  string endpoint = 2;
+}
+
+message CheckAccessResponse {
+  bool has_access = 1;
+  string user_id = 2;
+  string error = 3;
+}
