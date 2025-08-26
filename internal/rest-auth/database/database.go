@@ -47,7 +47,7 @@ func CloseDatabase(db *gorm.DB) {
 			log.Printf("Error getting sql.DB: %v", err)
 			return
 		}
-		
+
 		if err := sqlDB.Close(); err != nil {
 			log.Printf("Error closing database: %v", err)
 		} else {

@@ -73,6 +73,15 @@ func (v *Validation) ValidateLoginRequest(req *model.LoginRequest) error {
 	return nil
 }
 
+// Метод для валидации RefreshTokenRequest
+func (v *Validation) ValidateRefreshTokenRequest(req *model.RefreshTokenRequest) error {
+	if err := v.validator.Struct(req); err != nil {
+		// Преобразуем ошибки валидации в более понятные сообщения
+		return v.translateValidationErrors(err)
+	}
+	return nil
+}
+
 // translateValidationErrors преобразует ошибки валидации в понятные сообщения
 func (v *Validation) translateValidationErrors(err error) error {
 	if validationErrors, ok := err.(validator.ValidationErrors); ok {
@@ -99,11 +108,6 @@ func (v *Validation) translateValidationErrors(err error) error {
 	}
 
 	return err
-}
-
-// Метод для валидации RefreshTokenRequest
-func (v *Validation) ValidateRefreshTokenRequest(req *model.RefreshTokenRequest) error {
-	return v.validator.Struct(req)
 }
 
 // Метод для валидации UpdateProfileRequest

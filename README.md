@@ -1,6 +1,6 @@
 # Golang Chat Application
 
-A modern chat application built with Go, featuring authentication, real-time messaging, and REST API services.
+A modern chat application built with Go, featuring authentication, real-time messaging, and REST API services. The REST authentication service uses Fiber framework for high-performance HTTP handling.
 
 ## 🚀 Quick Start
 

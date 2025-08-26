@@ -2,7 +2,7 @@ package main
 
 import (
 	"log"
-	"net/http"
+	"strings"
 
 	"golang-chat/internal/rest-auth/database"
 	"golang-chat/internal/rest-auth/handler"
@@ -13,9 +13,11 @@ import (
 	"golang-chat/internal/rest-auth/validation"
 	"golang-chat/pkg/config"
 
-	"github.com/go-chi/chi/v5"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/rs/cors"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/fiber/v2/middleware/requestid"
 )
 
 func main() {
@@ -31,9 +33,11 @@ func main() {
 
 	// Выполняем автоматическую миграцию таблиц
 	if err := db.AutoMigrate(&model.User{}); err != nil {
-		log.Fatal("Failed to migrate database:", err)
+		log.Printf("⚠️ Warning: Database migration failed: %v", err)
+		log.Println("🔄 Continuing without migration...")
+	} else {
+		log.Println("✅ Database migration completed successfully")
 	}
-	log.Println("✅ Database migration completed successfully")
 
 	// Создаем валидатор
 	validator := validation.NewCustomValidator()
@@ -47,63 +51,70 @@ func main() {
 	// Создаем Auth Handler
 	authHandler := handler.NewAuthHandler(authService, validator)
 
-	// Создаем роутер с Chi
-	router := chi.NewRouter()
+	// Создаем Fiber приложение
+	app := fiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			code := fiber.StatusInternalServerError
+			if e, ok := err.(*fiber.Error); ok {
+				code = e.Code
+			}
+			return c.Status(code).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		},
+	})
 
 	// CORS middleware - должен быть первым!
-	corsMiddleware := cors.New(cors.Options{
-		AllowedOrigins:   cfg.CORSOrigins,
-		AllowedMethods:   cfg.CORSMethods,
-		AllowedHeaders:   cfg.CORSHeaders,
-		ExposedHeaders:   []string{"Link"},
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     strings.Join(cfg.CORSOrigins, ","), // Объединяем массив в строку
+		AllowMethods:     strings.Join(cfg.CORSMethods, ","),
+		AllowHeaders:     strings.Join(cfg.CORSHeaders, ","),
+		ExposeHeaders:    "Link",
 		AllowCredentials: true,
 		MaxAge:           300, // 5 минут
-	})
-	router.Use(corsMiddleware.Handler)
+	}))
 
 	// Middleware
-	router.Use(chimiddleware.Logger)    // Логирование запросов
-	router.Use(chimiddleware.Recoverer) // Восстановление после panic
-	router.Use(chimiddleware.RequestID) // Уникальные ID для запросов
-	router.Use(chimiddleware.RealIP)    // Реальные IP адреса
-	router.Use(chimiddleware.CleanPath) // Очистка путей
-	router.Use(chimiddleware.GetHead)   // Поддержка HEAD запросов
+	app.Use(logger.New())    // Логирование запросов
+	app.Use(recover.New())   // Восстановление после panic
+	app.Use(requestid.New()) // Уникальные ID для запросов
 
 	// Маршрут для проверки здоровья сервиса
-	router.Get("/health", healthCheckHandler)
+	app.Get("/health", healthCheckHandler)
 
 	// Маршрут для корневого маршрута
-	router.Get("/", rootHandler)
+	app.Get("/", rootHandler)
 
 	// Группируем маршруты для авторизации
-	router.Route("/api/auth", func(r chi.Router) {
-		r.Post("/register", authHandler.Register)
-		r.Post("/login", authHandler.Login)
-		r.Post("/refresh", authHandler.RefreshToken)
+	auth := app.Group("/api/auth")
+	auth.Post("/register", authHandler.Register)
+	auth.Post("/login", authHandler.Login)
+	auth.Post("/refresh", authHandler.RefreshToken)
 
-		// Защищенные маршруты - требуют аутентификации
-		r.Group(func(r chi.Router) {
-			r.Use(authmiddleware.AuthMiddleware(authService))
-			r.Get("/profile", authHandler.GetProfile)
-			r.Post("/logout", authHandler.Logout)
-		})
-	})
+	// Защищенные маршруты - требуют аутентификации
+	protected := auth.Group("/", authmiddleware.AuthMiddleware(authService))
+	protected.Get("/profile", authHandler.GetProfile)
+	protected.Post("/logout", authHandler.Logout)
 
 	// Запускаем HTTP сервер
 	log.Println("REST Auth Service starting on :8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	log.Fatal(app.Listen(":8080"))
 }
 
 // Обработчик для проверки здоровья сервиса
-func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status": "ok", "service": "auth-service", "router": "chi"}`))
+func healthCheckHandler(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"status":  "ok",
+		"service": "auth-service",
+		"router":  "fiber",
+	})
 }
 
 // Обработчик для корневого маршрута
-func rootHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "Golang Chat Auth Service", "version": "1.0.0", "router": "chi"}`))
+func rootHandler(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"message": "Golang Chat Auth Service",
+		"version": "1.0.0",
+		"router":  "fiber",
+	})
 }

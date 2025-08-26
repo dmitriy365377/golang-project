@@ -1,10 +1,9 @@
 package middleware
 
 import (
-	"context"
-	"net/http"
-
 	"golang-chat/internal/rest-auth/service"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 // Константы для контекста
@@ -14,65 +13,63 @@ const (
 )
 
 // AuthMiddleware проверяет JWT токен из cookies и добавляет информацию о пользователе в контекст
-func AuthMiddleware(authService *service.AuthService) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Получаем access token из cookie
-			accessTokenCookie, err := r.Cookie("access_token")
-			if err != nil {
-				// Если cookie не найден, возвращаем 401
-				http.Error(w, "Unauthorized: No access token", http.StatusUnauthorized)
-				return
-			}
+func AuthMiddleware(authService *service.AuthService) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Получаем access token из cookie
+		accessToken := c.Cookies("access_token")
+		if accessToken == "" {
+			// Если cookie не найден, возвращаем 401
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Unauthorized: No access token",
+			})
+		}
 
-			// Валидируем токен
-			userID, err := authService.ValidateToken(accessTokenCookie.Value)
-			if err != nil {
-				// Если токен невалиден, возвращаем 401
-				http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
-				return
-			}
+		// Валидируем токен
+		userID, err := authService.ValidateToken(accessToken)
+		if err != nil {
+			// Если токен невалиден, возвращаем 401
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Unauthorized: Invalid token",
+			})
+		}
 
-			// Получаем пользователя для получения роли
-			user, err := authService.GetUserByID(userID)
-			if err != nil {
-				http.Error(w, "Unauthorized: User not found", http.StatusUnauthorized)
-				return
-			}
+		// Получаем пользователя для получения роли
+		user, err := authService.GetUserByID(userID)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Unauthorized: User not found",
+			})
+		}
 
-			// Добавляем информацию о пользователе в контекст
-			ctx := context.WithValue(r.Context(), UserIDKey, userID)
-			ctx = context.WithValue(ctx, RoleKey, user.Role)
+		// Добавляем информацию о пользователе в локальное хранилище Fiber
+		c.Locals(UserIDKey, userID)
+		c.Locals(RoleKey, user.Role)
 
-			// Создаем новый запрос с обновленным контекстом
-			r = r.WithContext(ctx)
-
-			// Продолжаем обработку запроса
-			next.ServeHTTP(w, r)
-		})
+		// Продолжаем обработку запроса
+		return c.Next()
 	}
 }
 
 // RoleMiddleware проверяет роль пользователя для доступа к защищенным маршрутам
-func RoleMiddleware(requiredRole string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Получаем роль пользователя из контекста
-			role, ok := r.Context().Value(RoleKey).(string)
-			if !ok {
-				http.Error(w, "Forbidden: Role not found", http.StatusForbidden)
-				return
-			}
+func RoleMiddleware(requiredRole string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// Получаем роль пользователя из локального хранилища
+		role, ok := c.Locals(RoleKey).(string)
+		if !ok {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Forbidden: Role not found",
+			})
+		}
 
-			// Проверяем, есть ли у пользователя требуемая роль
-			if role != requiredRole && role != "admin" { // admin имеет доступ ко всему
-				http.Error(w, "Forbidden: Insufficient permissions", http.StatusForbidden)
-				return
-			}
+		// Проверяем, есть ли у пользователя требуемая роль
+		if role != requiredRole && role != "admin" { // admin имеет доступ ко всему
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Forbidden: Insufficient permissions",
+			})
+		}
 
-			// Продолжаем обработку запроса
-			next.ServeHTTP(w, r)
-		})
+		// Продолжаем обработку запроса
+		return c.Next()
 	}
 }
 
@@ -81,18 +78,18 @@ func RoleMiddleware(requiredRole string) func(http.Handler) http.Handler {
 // 1. Установку CORS заголовков
 // 2. Обработку preflight запросов (OPTIONS)
 // 3. Настройку разрешенных origins, methods, headers
-func CORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func CORS() fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		// TODO: Установить Access-Control-Allow-Origin
 		// TODO: Установить Access-Control-Allow-Methods
 		// TODO: Установить Access-Control-Allow-Headers
 		// TODO: Установить Access-Control-Allow-Credentials
 		// TODO: Обработать OPTIONS запросы
-		// TODO: Вызвать next.ServeHTTP для остальных запросов
+		// TODO: Вызвать c.Next() для остальных запросов
 
 		// Временная заглушка
-		next.ServeHTTP(w, r)
-	})
+		return c.Next()
+	}
 }
 
 // Logging middleware для логирования HTTP запросов
@@ -101,8 +98,8 @@ func CORS(next http.Handler) http.Handler {
 // 2. Логирование ответов
 // 3. Измерение времени выполнения
 // 4. Логирование ошибок
-func Logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func Logging() fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		// TODO: Записать время начала запроса
 		// TODO: Логировать метод, URL, IP адрес
 		// TODO: Создать response writer wrapper для перехвата статуса
@@ -110,8 +107,8 @@ func Logging(next http.Handler) http.Handler {
 		// TODO: Логировать результат (статус, время выполнения)
 
 		// Временная заглушка
-		next.ServeHTTP(w, r)
-	})
+		return c.Next()
+	}
 }
 
 // RateLimiting middleware для ограничения количества запросов
@@ -119,40 +116,41 @@ func Logging(next http.Handler) http.Handler {
 // 1. Подсчет запросов по IP адресу
 // 2. Ограничение количества запросов в единицу времени
 // 3. Возврат 429 Too Many Requests при превышении лимита
-func RateLimiting(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func RateLimiting() fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		// TODO: Получить IP адрес клиента
 		// TODO: Проверить лимит запросов для данного IP
 		// TODO: Если лимит превышен, вернуть 429
-		// TODO: Если лимит не превышен, увеличить счетчик и вызвать next.ServeHTTP
+		// TODO: Если лимит не превышен, увеличить счетчик и вызвать c.Next()
 
 		// Временная заглушка
-		next.ServeHTTP(w, r)
-	})
+		return c.Next()
+	}
 }
 
 // Helper функции
 
-// GetUserID получает user_id из контекста
-func GetUserID(r *http.Request) (string, bool) {
-	userID, ok := r.Context().Value(UserIDKey).(string)
+// GetUserID получает user_id из локального хранилища
+func GetUserID(c *fiber.Ctx) (string, bool) {
+	userID, ok := c.Locals(UserIDKey).(string)
 	return userID, ok
 }
 
-// GetUserRole получает роль пользователя из контекста
-func GetUserRole(r *http.Request) (string, bool) {
-	role, ok := r.Context().Value(RoleKey).(string)
+// GetUserRole получает роль пользователя из локального хранилища
+func GetUserRole(c *fiber.Ctx) (string, bool) {
+	role, ok := c.Locals(RoleKey).(string)
 	return role, ok
 }
 
 // RequireAuth проверяет, что пользователь аутентифицирован
-func RequireAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, ok := GetUserID(r)
+func RequireAuth() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		_, ok := GetUserID(c)
 		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Unauthorized",
+			})
 		}
-		next.ServeHTTP(w, r)
-	})
+		return c.Next()
+	}
 }

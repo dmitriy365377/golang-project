@@ -1,14 +1,14 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
-	"net/http"
-	"time"
+	"strings"
 
 	"golang-chat/internal/rest-auth/model"
 	"golang-chat/internal/rest-auth/service"
 	"golang-chat/internal/rest-auth/validation"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 // Кастомные ошибки для лучшей обработки
@@ -31,53 +31,59 @@ func NewAuthHandler(authService *service.AuthService, validator *validation.Vali
 	}
 }
 
-func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
-
+func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	// 1. Парсинг JSON
 	var req model.CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		sendErrorResponse(w, http.StatusBadRequest, "Invalid request body")
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
 	}
 
 	// 2. Валидация данных
 	if err := h.validator.ValidateCreateUserRequest(&req); err != nil {
-		sendErrorResponse(w, http.StatusBadRequest, "Validation error: "+err.Error())
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Validation error: " + err.Error(),
+		})
 	}
 
 	// 3. Проверка уникальности username
 	existingUser, err := h.authService.GetUserByUsername(req.Username)
 	if err == nil && existingUser != nil {
-		sendErrorResponse(w, http.StatusBadRequest, "Username already exists")
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Username already exists",
+		})
 	}
 
 	// 4. Проверка уникальности email
 	existingUser, err = h.authService.GetUserByEmail(req.Email)
 	if err == nil && existingUser != nil {
-		sendErrorResponse(w, http.StatusBadRequest, "Email already exists")
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Email already exists",
+		})
 	}
 
 	// 5. Создание пользователя
 	user, err := h.authService.CreateUser(&req)
 	if err != nil {
-		sendErrorResponse(w, http.StatusInternalServerError, "Failed to create user: "+err.Error())
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to create user: " + err.Error(),
+		})
 	}
 
 	// 6. Генерация токенов
 	accessToken, err := h.authService.GenerateAccessToken(user.ID, user.Role)
 	if err != nil {
-		sendErrorResponse(w, http.StatusInternalServerError, "Failed to generate access token: "+err.Error())
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to generate access token: " + err.Error(),
+		})
 	}
 
 	refreshToken, err := h.authService.GenerateRefreshToken(user.ID)
 	if err != nil {
-		sendErrorResponse(w, http.StatusInternalServerError, "Failed to generate refresh token: "+err.Error())
-		return
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to generate refresh token: " + err.Error(),
+		})
 	}
 
 	// 7. Формирование и отправка ответа
@@ -87,25 +93,24 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		User:         user,
 	}
 
-	sendJSONResponse(w, http.StatusCreated, response)
+	return c.Status(fiber.StatusCreated).JSON(response)
 }
 
 // Login выполняет вход пользователя
-func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	// Устанавливаем Content-Type
-	w.Header().Set("Content-Type", "application/json")
-
+func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	// Парсим JSON из request body
 	var req model.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		sendErrorResponse(w, http.StatusBadRequest, "Invalid request body")
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
 	}
 
 	// Валидируем данные
 	if err := h.validator.ValidateLoginRequest(&req); err != nil {
-		sendErrorResponse(w, http.StatusBadRequest, "Validation error: "+err.Error())
-		return
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Validation error: " + err.Error(),
+		})
 	}
 
 	// Вызываем authService.Login
@@ -114,40 +119,67 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		// Обрабатываем различные типы ошибок
 		switch {
 		case err.Error() == "invalid credentials":
-			sendErrorResponse(w, http.StatusUnauthorized, "Invalid username or password")
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Invalid username or password",
+			})
 		case err.Error() == "user not found":
-			sendErrorResponse(w, http.StatusUnauthorized, "Invalid username or password")
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Invalid username or password",
+			})
 		default:
-			sendErrorResponse(w, http.StatusInternalServerError, "Login failed: "+err.Error())
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Login failed: " + err.Error(),
+			})
 		}
-		return
 	}
 
 	// В случае успеха возвращаем 200 OK с токенами и информацией о пользователе
 	// Устанавливаем cookies
-	http.SetCookie(w, response.AccessTokenCookie)
-	http.SetCookie(w, response.RefreshTokenCookie)
+	c.Cookie(response.AccessTokenCookie)
+	c.Cookie(response.RefreshTokenCookie)
 
-	sendJSONResponse(w, http.StatusOK, response)
+	return c.Status(fiber.StatusOK).JSON(response)
 }
 
 // RefreshToken обновляет access token
-// TODO: Реализовать:
-// 1. Парсинг JSON из request body
-// 2. Валидацию refresh token
-// 3. Вызов authService.RefreshToken
-// 4. Обработку ошибок
-// 5. Возврат нового access token
-func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
-	// TODO: Установить Content-Type: application/json
-	// TODO: Парсить JSON из request body в RefreshTokenRequest
-	// TODO: Валидировать refresh token
-	// TODO: Вызвать authService.RefreshToken
-	// TODO: Обработать ошибки (неверный токен -> 401 Unauthorized)
-	// TODO: В случае успеха вернуть 200 OK с новым access token
+func (h *AuthHandler) RefreshToken(c *fiber.Ctx) error {
+	// 1. Парсинг JSON из request body
+	var req model.RefreshTokenRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
 
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+	// 2. Валидация данных
+	if err := h.validator.ValidateRefreshTokenRequest(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Validation error: " + err.Error(),
+		})
+	}
+
+	// 3. Вызов authService.RefreshToken
+	response, err := h.authService.RefreshToken(&req)
+	if err != nil {
+		// Обрабатываем различные типы ошибок
+		switch {
+		case strings.Contains(err.Error(), "invalid refresh token"):
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Invalid refresh token",
+			})
+		case strings.Contains(err.Error(), "user not found"):
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "User not found",
+			})
+		default:
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to refresh token: " + err.Error(),
+			})
+		}
+	}
+
+	// 4. В случае успеха возвращаем 200 OK с новым access token
+	return c.Status(fiber.StatusOK).JSON(response)
 }
 
 // GetProfile возвращает профиль текущего пользователя
@@ -156,14 +188,15 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 // 2. Вызов authService.GetUserByID
 // 3. Обработку ошибок
 // 4. Возврат профиля пользователя
-func (h *AuthHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
-	// TODO: Получить user_id из контекста (установленного middleware)
-	// TODO: Вызвать authService.GetUserByID
-	// TODO: Обработать ошибки (пользователь не найден -> 404 Not Found)
-	// TODO: В случае успеха вернуть 200 OK с профилем пользователя
-
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+func (h *AuthHandler) GetProfile(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(string)
+	user, err := h.authService.GetUserByID(userID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "User not found",
+		})
+	}
+	return c.Status(fiber.StatusOK).JSON(user)
 }
 
 // UpdateProfile обновляет профиль пользователя
@@ -174,7 +207,7 @@ func (h *AuthHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 // 4. Вызов authService.UpdateProfile
 // 5. Обработку ошибок
 // 6. Возврат обновленного профиля
-func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) UpdateProfile(c *fiber.Ctx) error {
 	// TODO: Получить user_id из контекста
 	// TODO: Парсить JSON из request body в UpdateProfileRequest
 	// TODO: Валидировать данные
@@ -182,43 +215,40 @@ func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	// TODO: Обработать ошибки
 	// TODO: В случае успеха вернуть 200 OK с обновленным профилем
 
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		"error": "not implemented",
+	})
 }
 
 // Logout выполняет выход пользователя
-func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) Logout(c *fiber.Ctx) error {
 	// Очищаем cookies, устанавливая их в прошлое
-	accessCookie := &http.Cookie{
+	accessCookie := &fiber.Cookie{
 		Name:     "access_token",
 		Value:    "",
 		Path:     "/",
-		HttpOnly: true,
+		HTTPOnly: true,
 		Secure:   false,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: "Strict",
 		MaxAge:   -1, // Удаляем cookie
-		Expires:  time.Now().Add(-1 * time.Hour),
 	}
 
-	refreshCookie := &http.Cookie{
+	refreshCookie := &fiber.Cookie{
 		Name:     "refresh_token",
 		Value:    "",
 		Path:     "/",
-		HttpOnly: true,
+		HTTPOnly: true,
 		Secure:   false,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: "Strict",
 		MaxAge:   -1, // Удаляем cookie
-		Expires:  time.Now().Add(-1 * time.Hour),
 	}
 
 	// Устанавливаем cookies для удаления
-	http.SetCookie(w, accessCookie)
-	http.SetCookie(w, refreshCookie)
+	c.Cookie(accessCookie)
+	c.Cookie(refreshCookie)
 
 	// Возвращаем успешный ответ
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"message": "Successfully logged out",
 	})
 }
@@ -230,7 +260,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 // 3. Вызов authService.GetAllUsers
 // 4. Обработку ошибок
 // 5. Возврат списка пользователей
-func (h *AuthHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) GetAllUsers(c *fiber.Ctx) error {
 	// TODO: Проверить роль пользователя (должен быть admin)
 	// TODO: Получить limit и offset из query string (?limit=10&offset=0)
 	// TODO: Установить значения по умолчанию (limit=10, offset=0)
@@ -238,26 +268,20 @@ func (h *AuthHandler) GetAllUsers(w http.ResponseWriter, r *http.Request) {
 	// TODO: Обработать ошибки
 	// TODO: В случае успеха вернуть 200 OK со списком пользователей
 
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		"error": "not implemented",
+	})
 }
 
-// GetUserByID возвращает информацию о конкретном пользователе
-// TODO: Реализовать:
-// 1. Извлечение user_id из URL параметров
-// 2. Проверку прав доступа (админ или сам пользователь)
-// 3. Вызов authService.GetUserByID
-// 4. Обработку ошибок
-// 5. Возврат информации о пользователе
-func (h *AuthHandler) GetUserByID(w http.ResponseWriter, r *http.Request) {
-	// TODO: Получить user_id из URL параметров (mux.Vars(r))
-	// TODO: Проверить права доступа (админ или сам пользователь)
-	// TODO: Вызвать authService.GetUserByID
-	// TODO: Обработать ошибки (пользователь не найден -> 404 Not Found)
-	// TODO: В случае успеха вернуть 200 OK с информацией о пользователе
-
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+func (h *AuthHandler) GetUserByID(c *fiber.Ctx) error {
+	userID := c.Params("id")
+	user, err := h.authService.GetUserByID(userID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "User not found",
+		})
+	}
+	return c.Status(fiber.StatusOK).JSON(user)
 }
 
 // UpdateUser обновляет информацию о пользователе (только для админов)
@@ -268,7 +292,7 @@ func (h *AuthHandler) GetUserByID(w http.ResponseWriter, r *http.Request) {
 // 4. Валидацию данных
 // 5. Вызов authService.UpdateProfile
 // 6. Обработку ошибок
-func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) UpdateUser(c *fiber.Ctx) error {
 	// TODO: Получить user_id из URL параметров
 	// TODO: Проверить роль пользователя (должен быть admin)
 	// TODO: Парсить JSON из request body
@@ -277,8 +301,9 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	// TODO: Обработать ошибки
 	// TODO: В случае успеха вернуть 200 OK с обновленной информацией
 
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		"error": "not implemented",
+	})
 }
 
 // DeleteUser удаляет пользователя (только для админов)
@@ -288,15 +313,16 @@ func (h *AuthHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 // 3. Вызов authService.DeleteUser
 // 4. Обработку ошибок
 // 5. Возврат успешного ответа
-func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) DeleteUser(c *fiber.Ctx) error {
 	// TODO: Получить user_id из URL параметров
 	// TODO: Проверить роль пользователя (должен быть admin)
 	// TODO: Вызвать authService.DeleteUser
 	// TODO: Обработать ошибки
 	// TODO: В случае успеха вернуть 200 OK с сообщением об удалении
 
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "not implemented"})
+	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
+		"error": "not implemented",
+	})
 }
 
 // Helper функции
@@ -305,7 +331,7 @@ func (h *AuthHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 // TODO: Реализовать:
 // 1. Получение user_id из контекста (установленного middleware)
 // 2. Обработку случая, когда user_id не найден
-func extractUserIDFromContext(r *http.Request) (string, error) {
+func extractUserIDFromContext(c *fiber.Ctx) (string, error) {
 	// TODO: Получить user_id из контекста
 	// TODO: Вернуть ошибку, если user_id не найден
 
@@ -316,7 +342,7 @@ func extractUserIDFromContext(r *http.Request) (string, error) {
 // TODO: Реализовать:
 // 1. Получение роли из контекста
 // 2. Обработку случая, когда роль не найдена
-func extractUserRoleFromContext(r *http.Request) (string, error) {
+func extractUserRoleFromContext(c *fiber.Ctx) (string, error) {
 	// TODO: Получить роль из контекста
 	// TODO: Вернуть ошибку, если роль не найдена
 
@@ -328,41 +354,11 @@ func extractUserRoleFromContext(r *http.Request) (string, error) {
 // 1. Извлечение limit и offset из query string
 // 2. Установку значений по умолчанию
 // 3. Валидацию параметров
-func parsePaginationParams(r *http.Request) (limit, offset int) {
+func parsePaginationParams(c *fiber.Ctx) (limit, offset int) {
 	// TODO: Получить limit из query string (?limit=10)
 	// TODO: Получить offset из query string (?offset=0)
 	// TODO: Установить значения по умолчанию (limit=10, offset=0)
 	// TODO: Валидировать параметры (limit > 0, offset >= 0)
 
 	return 10, 0
-}
-
-// sendJSONResponse отправляет JSON ответ
-// TODO: Реализовать:
-// 1. Установку Content-Type header
-// 2. Установку HTTP статуса
-// 3. Кодирование данных в JSON
-// 4. Обработку ошибок кодирования
-func sendJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
-	// TODO: Установить Content-Type: application/json
-	// TODO: Установить HTTP статус
-	// TODO: Закодировать данные в JSON
-	// TODO: Обработать ошибки кодирования
-
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(data)
-}
-
-// sendErrorResponse отправляет JSON ответ с ошибкой
-// TODO: Реализовать:
-// 1. Установку Content-Type header
-// 2. Установку HTTP статуса
-// 3. Кодирование ошибки в JSON
-func sendErrorResponse(w http.ResponseWriter, statusCode int, message string) {
-	// TODO: Установить Content-Type: application/json
-	// TODO: Установить HTTP статус
-	// TODO: Закодировать ошибку в JSON
-
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }

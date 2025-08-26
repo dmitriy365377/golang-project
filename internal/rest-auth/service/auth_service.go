@@ -3,13 +3,13 @@ package service
 import (
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"golang-chat/internal/rest-auth/model"
 	"golang-chat/internal/rest-auth/repository"
 	"golang-chat/pkg/config"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -117,22 +117,22 @@ func (s *AuthService) Login(req *model.LoginRequest) (*model.LoginResponse, erro
 	}
 
 	// 5. Создаем cookies
-	accessTokenCookie := &http.Cookie{
+	accessTokenCookie := &fiber.Cookie{
 		Name:     "access_token",
 		Value:    accessToken,
 		Path:     "/",
-		HttpOnly: true,                  // Защита от XSS
+		HTTPOnly: true,                  // Защита от XSS
 		Secure:   s.config.CookieSecure, // Из конфигурации
 		Domain:   s.config.CookieDomain, // Из конфигурации
 		SameSite: getSameSiteMode(s.config.CookieSameSite),
 		MaxAge:   15 * 60, // 15 минут
 	}
 
-	refreshTokenCookie := &http.Cookie{
+	refreshTokenCookie := &fiber.Cookie{
 		Name:     "refresh_token",
 		Value:    refreshToken,
 		Path:     "/",
-		HttpOnly: true,                  // Защита от XSS
+		HTTPOnly: true,                  // Защита от XSS
 		Secure:   s.config.CookieSecure, // Из конфигурации
 		Domain:   s.config.CookieDomain, // Из конфигурации
 		SameSite: getSameSiteMode(s.config.CookieSameSite),
@@ -158,50 +158,130 @@ func (s *AuthService) Login(req *model.LoginRequest) (*model.LoginResponse, erro
 	return response, nil
 }
 
-// getSameSiteMode преобразует строку в http.SameSite
-func getSameSiteMode(mode string) http.SameSite {
+// getSameSiteMode преобразует строку в fiber.SameSite
+func getSameSiteMode(mode string) string {
 	switch mode {
 	case "strict":
-		return http.SameSiteStrictMode
+		return "Strict"
 	case "lax":
-		return http.SameSiteLaxMode
+		return "Lax"
 	case "none":
-		return http.SameSiteNoneMode
+		return "None"
 	default:
-		return http.SameSiteLaxMode
+		return "Lax"
 	}
 }
 
 // RefreshToken обновляет access token с помощью refresh token
-// TODO: Реализовать:
-// 1. Валидацию refresh token
-// 2. Извлечение user_id из токена
-// 3. Проверку, что пользователь существует
-// 4. Генерацию нового access token
-// 5. Возврат нового access token
-func (s *AuthService) RefreshToken(req *model.RefreshTokenRequest) (string, error) {
-	// TODO: Валидировать refresh token
-	// TODO: Извлечь user_id из токена
-	// TODO: Проверить существование пользователя
-	// TODO: Сгенерировать новый access token
-	// TODO: Вернуть новый токен
+func (s *AuthService) RefreshToken(req *model.RefreshTokenRequest) (*model.RefreshTokenResponse, error) {
+	// 1. Валидируем refresh token
+	userID, err := s.ValidateRefreshToken(req.RefreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid refresh token: %w", err)
+	}
 
-	return "", errors.New("not implemented")
+	// 2. Проверяем существование пользователя
+	user, err := s.userRepository.GetUserByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("user not found: %w", err)
+	}
+
+	// 3. Генерируем новый access token
+	accessToken, err := s.GenerateAccessToken(user.ID, user.Role)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate access token: %w", err)
+	}
+
+	// 4. Возвращаем новый access token
+	response := &model.RefreshTokenResponse{
+		AccessToken: accessToken,
+		TokenType:   "Bearer",
+		ExpiresIn:   15 * 60, // 15 минут в секундах
+	}
+
+	return response, nil
 }
 
 // ValidateToken проверяет валидность access token
-// TODO: Реализовать:
-// 1. Парсинг JWT токена
-// 2. Проверку подписи
-// 3. Проверку времени жизни
-// 4. Извлечение user_id
 func (s *AuthService) ValidateToken(tokenString string) (string, error) {
-	// TODO: Парсить JWT токен
-	// TODO: Проверить подпись
-	// TODO: Проверить время жизни
-	// TODO: Извлечь user_id из claims
+	// Парсим JWT токен
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Проверяем алгоритм подписи
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(s.config.JWTSecret), nil
+	})
 
-	return "", errors.New("not implemented")
+	if err != nil {
+		return "", fmt.Errorf("failed to parse token: %w", err)
+	}
+
+	// Проверяем валидность токена
+	if !token.Valid {
+		return "", errors.New("invalid token")
+	}
+
+	// Извлекаем claims
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", errors.New("invalid token claims")
+	}
+
+	// Проверяем тип токена
+	tokenType, ok := claims["type"].(string)
+	if !ok || tokenType != "access" {
+		return "", errors.New("invalid token type")
+	}
+
+	// Извлекаем user_id
+	userID, ok := claims["user_id"].(string)
+	if !ok {
+		return "", errors.New("user_id not found in token")
+	}
+
+	return userID, nil
+}
+
+// ValidateRefreshToken проверяет валидность refresh token
+func (s *AuthService) ValidateRefreshToken(tokenString string) (string, error) {
+	// Парсим JWT токен
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Проверяем алгоритм подписи
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(s.config.JWTSecret), nil
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("failed to parse token: %w", err)
+	}
+
+	// Проверяем валидность токена
+	if !token.Valid {
+		return "", errors.New("invalid token")
+	}
+
+	// Извлекаем claims
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", errors.New("invalid token claims")
+	}
+
+	// Проверяем тип токена
+	tokenType, ok := claims["type"].(string)
+	if !ok || tokenType != "refresh" {
+		return "", errors.New("invalid token type")
+	}
+
+	// Извлекаем user_id
+	userID, ok := claims["user_id"].(string)
+	if !ok {
+		return "", errors.New("user_id not found in token")
+	}
+
+	return userID, nil
 }
 
 // UpdateProfile обновляет профиль пользователя

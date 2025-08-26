@@ -1,24 +1,22 @@
 package model
 
 import (
-	"net/http"
 	"time"
 
-	"gorm.io/gorm"
+	"github.com/gofiber/fiber/v2"
 )
 
 // User представляет пользователя в системе
 // TODO: Добавить поля для ролей и дополнительной информации
 type User struct {
-	ID        string         `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	Username  string         `json:"username" gorm:"uniqueIndex;not null;size:50"`
-	Email     string         `json:"email" gorm:"uniqueIndex;not null;size:100"`
-	Password  string         `json:"-" gorm:"column:password_hash;not null;size:255"` // "-" означает, что поле не будет сериализоваться в JSON
-	Role      string         `json:"role" gorm:"default:'user';size:20"`              // TODO: Добавить роли (user, admin, moderator)
-	FirstName string         `json:"first_name" gorm:"size:50"`
-	CreatedAt time.Time      `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt time.Time      `json:"updated_at" gorm:"autoUpdateTime"`
-	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"` // Soft delete
+	ID        string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	Username  string    `json:"username" gorm:"uniqueIndex;not null;size:50"`
+	Email     string    `json:"email" gorm:"uniqueIndex;not null;size:100"`
+	Password  string    `json:"-" gorm:"column:password_hash;not null;size:255"` // "-" означает, что поле не будет сериализоваться в JSON
+	Role      string    `json:"role" gorm:"default:'user';size:20"`              // TODO: Добавить роли (user, admin, moderator)
+	FirstName string    `json:"first_name" gorm:"size:50"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 	// TODO: Добавить дополнительные поля:
 	// - LastName string
 	// - Phone string
@@ -50,8 +48,8 @@ type LoginResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	User         *User  `json:"user"`
 	// Cookie настройки
-	AccessTokenCookie  *http.Cookie `json:"-"`
-	RefreshTokenCookie *http.Cookie `json:"-"`
+	AccessTokenCookie  *fiber.Cookie `json:"-"`
+	RefreshTokenCookie *fiber.Cookie `json:"-"`
 	// TODO: Добавить дополнительные поля:
 	// - ExpiresIn int (время жизни токена в секундах)
 	// - TokenType string (обычно "Bearer")
@@ -60,6 +58,13 @@ type LoginResponse struct {
 // RefreshTokenRequest - запрос на обновление токена
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
+}
+
+// RefreshTokenResponse - ответ на обновление токена
+type RefreshTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int64  `json:"expires_in"`
 }
 
 // UpdateProfileRequest - запрос на обновление профиля
